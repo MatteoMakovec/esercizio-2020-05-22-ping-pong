@@ -32,15 +32,18 @@ fino a MAX_VALUE, quando termina il programma.
 
 #define CHECK_ERR(a,msg) {if ((a) == -1) { perror((msg)); exit(EXIT_FAILURE); } }
 
-#define MAX_VALUE 10
-#define BUF_SIZE 4096
+#define MAX_VALUE 1000000
+#define BUF_SIZE 1024
 
 void child_process();
 void parent_process();
+void writePipe(int fd, int count);
+void readPipe(int fd, int count);
 
 int pipe1[2];
 int pipe2[2];
 char * buffer;
+int pid;
 
 int main() {
 	int res = pipe(pipe1);
@@ -48,6 +51,8 @@ int main() {
 
 	res = pipe(pipe2);
 	CHECK_ERR(res, "pipe2")
+
+	pid = getpid();
 
 	int r = 0;
 
@@ -86,95 +91,59 @@ int main() {
 
 			r = close(pipe1[1]);
 			CHECK_ERR(r, "pipe1 close")
+
+			if(wait(NULL) == -1){
+				perror("wait() error");
+				exit(EXIT_FAILURE);
+			}
 	}
 
-	if(wait(NULL) == -1){
-		perror("wait() error");
-		exit(EXIT_FAILURE);
-	}
-
-	return 0;
+	exit(EXIT_SUCCESS);
 }
 
 void parent_process(){
 	int counter = 0;
-	int bytes_read = 0;
-	int total_read = 0;
+	writePipe(pipe1[1], counter);
+	readPipe(pipe2[0], pipe1[1]);
+}
+
+void child_process(){
+	readPipe(pipe1[0], pipe2[1]);
+}
+
+void writePipe(int fd, int count){
 	int written = 0;
 	int total_written = 0;
 
-	while ((written = write(pipe1[1], &counter, sizeof(int))) > 0) {
+	while ((written = write(fd, &count, sizeof(int))) > 0) {
 		total_written += written;
 		if (total_written < sizeof(int))
 			continue;
 		else
 			return;
 	}
-
-	written = 0;
-	total_written = 0;
-
-	for(;;){
-		while ((bytes_read = read(pipe2[0], &counter, sizeof(int))) > 0) {
-		total_read += bytes_read;
-		if (total_read < sizeof(int))
-			continue;
-
-		if (counter < MAX_VALUE) {
-			counter++;
-			printf("[parent] counter: %d", counter);
-		} else {
-			exit(EXIT_SUCCESS);
-		}
-
-		while ((written = write(pipe1[1], &counter, sizeof(int))) > 0) {
-			total_written += written;
-			if (total_written < sizeof(int))
-				continue;
-			else
-				return;
-		}
-
-		total_read = 0;
-		bytes_read = 0;
-		written = 0;
-		total_written = 0;
-		}
-	}
 }
 
-void child_process(){
-	int counter = 0;
-	int bytes_read = 0;
-	int total_read = 0;
-	int written = 0;
-	int total_written = 0;
-
-	for(;;){
-		while ((bytes_read = read(pipe1[0], &counter, sizeof(int))) > 0) {
+void readPipe(int fd1, int fd2){
+	int count, bytes_read, total_read = 0;
+	while ((bytes_read = read(fd1, &count, sizeof(int))) > 0) {
 		total_read += bytes_read;
 		if (total_read < sizeof(int))
 			continue;
-
-		if (counter < MAX_VALUE) {
-			counter++;
-			printf("[child] counter: %d", counter);
-		} else {
+		if(count < MAX_VALUE){
+			count++;
+			if(pid == getpid()){
+				printf("[parent] Counter value: %d\n", count);
+			}
+			else{
+				printf("[child] Counter value: %d\n", count);
+			}
+		}
+		else{
 			break;
 		}
 
-		while ((written = write(pipe2[1], &counter, sizeof(int))) > 0) {
-			total_written += written;
-			if (total_written < sizeof(int))
-				continue;
-			else
-				return;
-		}
-
+		writePipe(fd2, count);
 		total_read = 0;
-		bytes_read = 0;
-		written = 0;
-		total_written = 0;
-		}
 	}
 }
